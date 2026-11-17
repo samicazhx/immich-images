@@ -2,10 +2,24 @@ name: save-immich-images
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   packages: read
+env:
+  TAG: immich-v3
+  GH_REPO: ${{ github.repository }}
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "$TAG" --cleanup-tag -y || true
+          gh release create "$TAG" --title "Immich images" \
+            --notes "Split docker save files. Join the parts and pipe into docker load."
   save:
+    needs: release
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -21,18 +35,17 @@ jobs:
     steps:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-      - name: Pull and save
+      - name: Pull, save and split
         run: |
           for i in 1 2 3 4 5 6 7 8; do
             docker pull --platform linux/amd64 "${{ matrix.image }}" && break
             echo "pull failed, retry $i"; sleep $((i*20))
           done
           docker image inspect "${{ matrix.image }}" > /dev/null
-          docker save "${{ matrix.image }}" | gzip -1 > "${{ matrix.name }}.tar.gz"
-          ls -lh "${{ matrix.name }}.tar.gz"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: immich-${{ matrix.name }}
-          path: ${{ matrix.name }}.tar.gz
-          compression-level: 0
-          retention-days: 3
+          docker save "${{ matrix.image }}" | gzip -1 | split -b 1500M -d -a 2 - "immich-${{ matrix.name }}.tar.gz.part-"
+          sha256sum immich-${{ matrix.name }}.tar.gz.part-* > "immich-${{ matrix.name }}.sha256"
+          ls -lh immich-${{ matrix.name }}.*
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" immich-${{ matrix.name }}.tar.gz.part-* "immich-${{ matrix.name }}.sha256" --clobber
