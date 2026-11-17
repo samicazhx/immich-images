@@ -1,0 +1,28 @@
+name: save-immich-images
+on:
+  workflow_dispatch:
+jobs:
+  save:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            image: ghcr.io/immich-app/immich-server:v3
+          - name: machine-learning
+            image: ghcr.io/immich-app/immich-machine-learning:v3
+          - name: postgres
+            image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0
+    steps:
+      - name: Pull and save
+        run: |
+          docker pull --platform linux/amd64 "${{ matrix.image }}"
+          docker save "${{ matrix.image }}" | gzip -1 > "${{ matrix.name }}.tar.gz"
+          ls -lh "${{ matrix.name }}.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: immich-${{ matrix.name }}
+          path: ${{ matrix.name }}.tar.gz
+          compression-level: 0
+          retention-days: 3
